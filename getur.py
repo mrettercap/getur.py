@@ -2,6 +2,38 @@ import httplib2
 import json
 import os
 
+auth_headers = {'Authorization':'Client-ID 37d87caf158e8a4'}
+
+class Image:
+    def __init__(self, imgur_id):
+        self.imgur_id = imgur_id
+        self.imgur_type = 'image'
+    def validate(self):
+        h = httplib2.Http('.cache')
+        resp, content = h.request('https://api.imgur.com/3/{0}/{1}'.format(self.imgur_type, self.imgur_id),
+                        headers=auth_headers)
+
+        if resp["status"] == '200':
+            return True
+        else:
+            return False
+
+class Album(Image):
+    def __init__(self, imgur_id):
+        self.imgur_id = imgur_id
+        self.imgur_type = 'album'
+## so:
+#  validate_return = Image("Nu83J").validate()
+#  (validate_return returns the resp status)
+#  if validate == '200':
+#     Image("Nu83J").download()
+#  else:
+#     Album("Nu83J").validate()
+#     if validate == '200':
+#       Album("Nu83J").download()
+#     else:
+#       raise Exception("Doesn't exist!")
+
 class Fetch:
     '''grab files'''
 
@@ -11,11 +43,27 @@ class Fetch:
         self.forceOverwrite = forceOverwrite
         self.count = 0
         h = httplib2.Http('.cache')
-        print("Making connection with imgur for album {}".format(album))
-        resp, content = h.request("https://api.imgur.com/3/album/{}".format(album), headers={'Authorization':'Client-ID 37d87caf158e8a4'})
-        print("Album found. Parsing data")
+        print("Making connection with imgur item id {}".format(album))
+        # validate_album(album):
+        resp, content = h.request("https://api.imgur.com/3/album/{}".format(album), 
+                                  headers={'Authorization':'Client-ID 37d87caf158e8a4'})
+        self.idtype = "album"
+
+        if resp["status"] != '200':
+            resp, content = h.request("https://api.imgur.com/3/image/{}".format(album), 
+                                      headers={'Authorization':'Client-ID 37d87caf158e8a4'})
+            self.idtype = "image"
+        
+        if resp["status"] != '200':
+            raise Exception("Error {}".format(resp["status"]))
+
+        print("{0} {1} found. Parsing data".format(self.idtype, self.album))
         self.js = json.loads(content.decode('utf-8'))
-        self.images_count = self.js["data"]["images_count"]
+
+        if self.idtype == "image":
+            self.images_count = 1
+        else:
+            self.images_count = self.js["data"]["images_count"]
 
         try:
             os.makedirs(os.path.join(self.subreddit,self.js["data"]["id"]))
