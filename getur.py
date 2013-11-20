@@ -1,133 +1,103 @@
+#!/usr/bin/env python3
 import httplib2
 import json
 import os
+import argparse
 
 auth_headers = {'Authorization':'Client-ID 37d87caf158e8a4'}
 
+# Image class
 class Image:
-    def __init__(self, imgur_id):
+    '''our image class, deals with all image-related activities'''
+    def __init__(self, imgur_id, imgur_type='image'):
         self.imgur_id = imgur_id
-        self.imgur_type = 'image'
-    def validate(self):
-        h = httplib2.Http('.cache')
-        resp, content = h.request('https://api.imgur.com/3/{0}/{1}'.format(self.imgur_type, self.imgur_id),
-                        headers=auth_headers)
+        self.imgur_type = imgur_type
+        # Set our cache directory
+        self.h = httplib2.Http('.cache')
+        self.resp,self.content = self.h.request('https://api.imgur.com/3/{0}/{1}'
+                                  .format(self.imgur_type, self.imgur_id),
+                                  headers=auth_headers)
 
-        if resp["status"] == '200':
+    def validate(self):
+        '''validates whether the image exists on imgur'''
+        if self.resp["status"] == '200':
             return True
         else:
             return False
 
+    def download(self, subreddit):
+        '''downloads the image'''
+        # turn the content we grabbed in the __init__
+        # function into a json dictionary
+        js = json.loads(self.content.decode('utf-8'))
+
+        # make the subreddit dir. if it already exists,
+        # don't warn us; it's nbd.
+        try:
+            os.makedirs(subreddit)
+        except:
+            pass
+       
+        print("\x1b[A{0} (1/1)\x1b[K".format(js['data']['id']))
+        # now grab the image, pull it into a variable
+        resp, content = self.h.request(js['data']['link'])
+        # open the image locally with format:
+        # {subreddit}/{count-with-leading-zero}-{id}.jpg
+        with open(os.path.join(subreddit, '{}.jpg'.format(js['data']['id'])), 'wb') as f:
+                f.write(content)
+        return "\x1b[ADownloaded 1 file.\x1b[K"
+
+# extend Image
 class Album(Image):
     def __init__(self, imgur_id):
-        self.imgur_id = imgur_id
-        self.imgur_type = 'album'
-## so:
-#  validate_return = Image("Nu83J").validate()
-#  (validate_return returns the resp status)
-#  if validate == '200':
-#     Image("Nu83J").download()
-#  else:
-#     Album("Nu83J").validate()
-#     if validate == '200':
-#       Album("Nu83J").download()
-#     else:
-#       raise Exception("Doesn't exist!")
+        super(Album,self).__init__(imgur_id, imgur_type='album')
+    def download(self,subreddit):
+        js = json.loads(self.content.decode('utf-8'))
+        try:
+            os.makedirs(os.path.join(subreddit,js['data']['id']))
+        except:
+            pass
 
-class Fetch:
+        count = 0
+        for i in js['data']['images']:
+            count += 1
+            if i['animated'] == True:
+                img_fn = "{0}-{1}.gif".format(format(count,'02d'),i['id'])
+            else:
+                img_fn = "{0}-{1}.jpg".format(format(count,'02d'),i['id'])
+            print("\x1b[A{0} ({1}/{2})\x1b[K".format(i['id'],count,js['data']['images_count']))
+            resp, content = self.h.request(i['link'])
+            with open(os.path.join(subreddit,self.imgur_id,img_fn), 'wb') as f:
+                f.write(content)
+        return "\x1b[ADownloaded {0} files.\x1b[K".format(count) 
+
+class Imgur:
     '''grab files'''
 
-    def __init__(self, album, subreddit, forceOverwrite=False):
-        self.album = album
+    def __init__(self, imgur_id, subreddit, imgurType=None):
+        self.imgur_id = imgur_id
         self.subreddit = subreddit
-        self.forceOverwrite = forceOverwrite
+        self.imgurType = imgurType
         self.count = 0
-        h = httplib2.Http('.cache')
-        print("Making connection with imgur item id {}".format(album))
-        # validate_album(album):
-        resp, content = h.request("https://api.imgur.com/3/album/{}".format(album), 
-                                  headers={'Authorization':'Client-ID 37d87caf158e8a4'})
-        self.idtype = "album"
-
-        if resp["status"] != '200':
-            resp, content = h.request("https://api.imgur.com/3/image/{}".format(album), 
-                                      headers={'Authorization':'Client-ID 37d87caf158e8a4'})
-            self.idtype = "image"
         
-        if resp["status"] != '200':
-            raise Exception("Error {}".format(resp["status"]))
-
-        print("{0} {1} found. Parsing data".format(self.idtype, self.album))
-        self.js = json.loads(content.decode('utf-8'))
-
-        if self.idtype == "image":
-            self.images_count = 1
-        else:
-            self.images_count = self.js["data"]["images_count"]
-
-        try:
-            os.makedirs(os.path.join(self.subreddit,self.js["data"]["id"]))
-        except:
-            if self.forceOverwrite == False:
-                raise Exception("This album has already been downloaded!")
+    def fetch(self):
+        if Album(self.imgur_id).validate() == False:
+            if Image(self.imgur_id).validate() == False:
+                raise Exception("No such item exists!")
             else:
-                pass
-
-        print("Grabbing {1} total images for album {0}:".format(self.album, self.images_count))
-
-        # 1. make a connection with imgur. 
-        #   a. find out whether it's an image or an album
-        #   b. set images_count accordingly
-        #   c. announce "downloading image_name"
-        #   d. download.
-
-    def __iter__(self):
-        return self
-
-    def __next__(self):
-        self.count += 1
-        if self.count > self.images_count:
-            raise StopIteration
-
-        h = httplib2.Http('.cache')
-        resp, content = h.request(self.js["data"]["images"][self.count - 1]["link"])
+                print("Found image {}".format(self.imgur_id))
+                print(Image(self.imgur_id).download(self.subreddit))
+        else:
+            print("Found album {}".format(self.imgur_id))
+            print(Album(self.imgur_id).download(self.subreddit))
 
 
-        with open(os.path.join(
-                                self.subreddit,
-                                self.js["data"]["id"],
-                                "{0}-{1}.jpg".format(format(self.count, '02d'), # leading zero
-                                                     self.js["data"]["images"][self.count - 1]["id"])
-                              ),
-                  "wb") as f:
-            f.write(content)
+parser = argparse.ArgumentParser()
+parser.add_argument("theid", help="the imgur ID of the item")
+parser.add_argument("subreddit", help="the subreddit the item is from")
+args = parser.parse_args()
 
-        return self.count, self.js["data"]["images"][self.count - 1]["id"]
-
-
-# h = httplib2.Http('.cache')
-# resp, content = h.request("https://api.imgur.com/3/album/Nu83J", headers={'Authorization':'Client-ID 37d87caf158e8a4'})
-# js = json.loads(content.decode('utf-8'))
-
-# title:     js["data"]["title"]
-# desc:      js["data"]["description"]
-# no_images: js["data"]["images_count"]
-# cover:     js["data"]["cover"]
-
-# images:
-
-# for i in js["data"]["images"]:
-#        print(i["id"]) # etc
-
-# if i["id"]["animated"] == True:
-#       i.ext = ".gif"
-
-# Downloads for:
-# --------------
-
-# Albums
-# Images
-# Then users
+Imgur(args.theid,args.subreddit).fetch()
 
 # Tests:
 # ------
